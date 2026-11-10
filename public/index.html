@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POD Order Dashboard</title>
+<style>
+:root{--bg:#050a17;--panel:#0a1224;--card:#0d172c;--line:#1b2a47;--text:#e8edf7;--mut:#8b9ab5;--acc:#3b9cff;--ok:#22c58b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1700px;margin:0 auto;padding:22px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 16px}
+#login,#drop{border:2px dashed var(--line);border-radius:14px;background:var(--panel);padding:26px 16px;text-align:center}
+#login input{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#070e1e;color:var(--text);font:inherit;width:min(420px,100%)}
+.btn{padding:9px 16px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);font:inherit;cursor:pointer}
+.btn:hover{border-color:var(--acc)}
+#usage{display:none;margin:14px 0;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 16px;font-size:13px;color:var(--mut)}
+#usage b{color:var(--text)}
+#err{display:none;background:rgba(229,72,77,.15);border:1px solid #e5484d;color:#ffb4b8;border-radius:10px;padding:10px 14px;margin:12px 0}
+.stats{display:none;gap:10px;flex-wrap:wrap;margin:16px 0}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 16px}
+.stat b{display:block;font-size:20px}.stat span{color:var(--mut);font-size:12px}
+.order{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-bottom:22px}
+.oh{display:flex;gap:14px;padding:16px 18px;align-items:flex-start}
+.num{width:44px;height:44px;border-radius:12px;background:#121d36;border:1px solid var(--line);display:grid;place-items:center;font-weight:700;flex:none}
+.nm{font-size:20px;font-weight:700}
+.tag{font-size:12px;background:#121d36;border:1px solid var(--line);border-radius:8px;padding:2px 8px;color:var(--mut);margin-left:10px;font-weight:600;vertical-align:middle}
+.ad{font-weight:600;color:#c9d3e6;margin:6px 0;white-space:pre-line}
+.cnt{color:var(--acc);font-size:14px}
+.ph{border-top:1px solid var(--line);padding:16px 18px;background:#070e1e}
+.pt{font-size:14px;font-weight:600;color:#cfe0ff;margin:0 0 12px}
+.pg{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.pc{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.pi{position:relative;height:300px;background:#e9eef6;display:grid;place-items:center}
+.pi img{width:100%;height:100%;object-fit:contain;cursor:zoom-in}
+.lab{position:absolute;top:8px;left:8px;font-size:12px;font-weight:700;padding:3px 9px;border-radius:7px;background:rgba(10,18,36,.9);color:#fff}
+.ins{color:#c9d3e6;font-size:14px;margin:4px 0}.ins b{color:var(--mut);font-weight:600}
+.st{font-size:12px;font-weight:700;padding:2px 9px;border-radius:7px;margin-left:10px;vertical-align:middle;background:#26324d;color:#cfd8ea}
+.st.ok{background:var(--ok);color:#04251a}.st.bad{background:#e5484d;color:#fff}.st.mid{background:#f0b429;color:#2b1d00}
+.er{margin-top:6px;background:rgba(229,72,77,.15);border:1px solid #e5484d;color:#ffb4b8;border-radius:8px;padding:6px 10px;font-size:13px}
+.empty{text-align:center;color:var(--mut);padding:40px 0}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:9;padding:12px}
+#lb img{max-width:100%;max-height:100%;background:#fff;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>POD Order Dashboard</h1>
+  <p class="sub">Sign in with your access key, then upload your Excel file. Parsing happens on the server — your account's usage is tracked automatically.</p>
+
+  <div id="login">
+    <input id="apiKey" type="password" placeholder="Paste your access key (pod_...)">
+    <button class="btn" id="signin">Sign in</button>
+  </div>
+
+  <div id="usage"></div>
+  <div id="err"></div>
+
+  <div id="drop" style="display:none">
+    <b>Choose an Excel file</b> or drag it here
+    <input id="file" type="file" accept=".xlsx,.xlsm" hidden>
+  </div>
+
+  <div class="stats" id="stats"></div>
+  <div id="list"></div>
+</div>
+<div id="lb"><img alt=""></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let apiKey = sessionStorage.getItem('apiKey') || '';
+
+function showErr(msg){ $('err').style.display='block'; $('err').textContent = msg; }
+function clearErr(){ $('err').style.display='none'; }
+
+async function refreshUsage(){
+  try{
+    const r = await fetch('/api/usage', { headers: { 'x-api-key': apiKey } });
+    if(!r.ok) throw new Error((await r.json()).error || 'Could not sign in.');
+    const u = await r.json();
+    $('usage').style.display='block';
+    $('usage').innerHTML = `Signed in as <b>${esc(u.name)}</b> (${esc(u.plan)} plan) &middot; `
+      + `Uploads used this period: <b>${u.uploads_used}/${u.upload_limit}</b> &middot; `
+      + `Period started ${esc(u.period_start)} UTC, resets every ${u.period_days} days.`;
+    $('login').style.display='none';
+    $('drop').style.display='block';
+    clearErr();
+  }catch(e){
+    showErr(e.message);
+    sessionStorage.removeItem('apiKey');
+  }
+}
+
+$('signin').onclick = () => {
+  apiKey = $('apiKey').value.trim();
+  if(!apiKey) return;
+  sessionStorage.setItem('apiKey', apiKey);
+  refreshUsage();
+};
+if(apiKey) refreshUsage();
+
+$('drop').onclick = () => $('file').click();
+$('file').onchange = e => e.target.files[0] && upload(e.target.files[0]);
+['dragover','dragenter'].forEach(v=>$('drop').addEventListener(v,e=>e.preventDefault()));
+$('drop').addEventListener('drop', e=>{ e.preventDefault(); e.dataTransfer.files[0] && upload(e.dataTransfer.files[0]); });
+
+async function upload(file){
+  clearErr();
+  $('list').innerHTML = '<div class="empty">Uploading and parsing...</div>';
+  const fd = new FormData();
+  fd.append('file', file);
+  try{
+    const r = await fetch('/api/upload', { method:'POST', headers:{ 'x-api-key': apiKey }, body: fd });
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.error || 'Upload failed.');
+    render(data.orders);
+    $('usage').innerHTML = $('usage').innerHTML.replace(/Uploads used this period: <b>[^<]+<\/b>/,
+      `Uploads used this period: <b>${data.usage.uploads_used}/${data.usage.upload_limit}</b>`);
+  }catch(e){
+    showErr(e.message);
+    $('list').innerHTML='';
+  }
+}
+
+function render(orders){
+  $('stats').style.display='flex';
+  const totalPhotos = orders.reduce((a,o)=>a+o.photoCount,0);
+  $('stats').innerHTML = [[orders.length,'Orders'],[totalPhotos,'Photos'],[orders.filter(o=>!o.photoCount).length,'Orders without photos']]
+    .map(([n,l])=>`<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');
+
+  if(!orders.length){ $('list').innerHTML='<div class="empty">No orders found.</div>'; return; }
+
+  $('list').innerHTML = orders.map(o => `
+    <div class="order">
+      <div class="oh">
+        <div class="num">#${o.stop}</div>
+        <div>
+          <div><span class="nm">${esc(o.cust||'No customer name')}</span>
+            ${String(o.id)===String(o.stop)?'':`<span class="tag">#${esc(o.id)}</span>`}
+            ${(o.dstatus||o.status)?`<span class="st ${o.statusClass}">${esc(o.dstatus||o.status)}</span>`:''}
+            ${o.att?`<span class="tag">Attempts: ${esc(o.att)}</span>`:''}
+          </div>
+          <div class="ad">${esc(o.addr||'No address')}</div>
+          ${o.instr?`<div class="ins"><b>Instructions:</b> ${esc(o.instr)}</div>`:''}
+          <div class="cnt">&#128247; ${o.photoCount} POD Photo${o.photoCount===1?'':'s'} attached</div>
+          ${o.error && !/^(none|n\/a|na|-|null|0)$/i.test(o.error)?`<div class="er"><b>Error:</b> ${esc(o.error)}</div>`:''}
+        </div>
+      </div>
+      ${o.photos.length?`<div class="ph"><div class="pt">Attached POD Evidence Photos (${o.photos.length})</div><div class="pg">
+        ${o.photos.map((p,j)=>`<div class="pc"><div class="pi"><img src="${esc(p.type==='embedded'?p.dataUrl:p.url)}" alt="Photo ${j+1}"><span class="lab">Photo #${j+1}</span></div></div>`).join('')}
+      </div></div>`:''}
+    </div>
+  `).join('');
+}
+
+$('list').addEventListener('click', e => {
+  if(e.target.tagName==='IMG'){ $('lb').querySelector('img').src=e.target.src; $('lb').style.display='flex'; }
+});
+$('lb').addEventListener('click', ()=> $('lb').style.display='none');
+</script>
+</body>
+</html>

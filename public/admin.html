@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — POD Dashboard</title>
+<style>
+:root{--bg:#050a17;--panel:#0a1224;--card:#0d172c;--line:#1b2a47;--text:#e8edf7;--mut:#8b9ab5;--acc:#3b9cff;--ok:#22c58b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:780px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 20px}
+h2{font-size:16px;margin:28px 0 10px;color:#cfe0ff}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+label{display:block;font-size:13px;color:var(--mut);margin:12px 0 5px}
+label:first-child{margin-top:0}
+input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#070e1e;color:var(--text);font:inherit}
+.row{display:flex;gap:12px}
+.row>div{flex:1}
+.btn{margin-top:16px;padding:10px 18px;border:1px solid var(--acc);border-radius:10px;background:var(--acc);color:#04142b;font:inherit;font-weight:700;cursor:pointer}
+.btn:hover{opacity:.9}
+.btn.sec{background:var(--panel);color:var(--text);border-color:var(--line)}
+#err{display:none;background:rgba(229,72,77,.15);border:1px solid #e5484d;color:#ffb4b8;border-radius:10px;padding:10px 14px;margin:14px 0}
+#result{display:none;margin-top:16px;background:#07241a;border:1px solid var(--ok);border-radius:12px;padding:16px}
+#result b{color:var(--ok)}
+.key{margin-top:8px;background:#070e1e;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-family:ui-monospace,Consolas,monospace;font-size:14px;word-break:break-all;display:flex;align-items:center;gap:10px}
+.key span{flex:1}
+table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase}
+.badge{font-size:11px;padding:2px 8px;border-radius:7px;background:#121d36;color:var(--mut)}
+.badge.on{background:var(--ok);color:#04251a}
+.badge.off{background:#e5484d;color:#fff}
+.muted{color:var(--mut);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Admin</h1>
+  <p class="sub">Create client accounts and see who's using them. Keep this page and your admin secret private — anyone with the secret can create or disable clients.</p>
+
+  <div class="card">
+    <label>Admin secret</label>
+    <input id="secret" type="password" placeholder="Your ADMIN_SECRET from the server's environment">
+    <button class="btn sec" id="loadBtn">Unlock</button>
+  </div>
+
+  <div id="main" style="display:none">
+    <h2>Create a new client</h2>
+    <div class="card">
+      <label>Client name</label>
+      <input id="name" placeholder="e.g. Acme Logistics">
+      <div class="row">
+        <div>
+          <label>Upload limit</label>
+          <input id="limit" type="number" value="10" min="1">
+        </div>
+        <div>
+          <label>Resets every (days)</label>
+          <input id="days" type="number" value="30" min="1">
+        </div>
+      </div>
+      <button class="btn" id="createBtn">Create client</button>
+      <div id="err"></div>
+      <div id="result">
+        <div><b>Client created.</b> Copy this key now and send it to your client — it cannot be shown again.</div>
+        <div class="key"><span id="keyText"></span><button class="btn sec" id="copyBtn" style="margin-top:0">Copy</button></div>
+      </div>
+    </div>
+
+    <h2>Existing clients</h2>
+    <div class="card">
+      <button class="btn sec" id="refreshBtn">Refresh list</button>
+      <table id="clientTable">
+        <thead><tr><th>Name</th><th>Plan</th><th>Usage</th><th>Resets</th><th>Status</th><th></th></tr></thead>
+        <tbody id="clientRows"><tr><td colspan="6" class="muted">Click Refresh to load.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let secret = sessionStorage.getItem('adminSecret') || '';
+if(secret){ $('secret').value = secret; }
+
+function showErr(msg){ $('err').style.display='block'; $('err').textContent = msg; }
+function clearErr(){ $('err').style.display='none'; }
+
+async function adminFetch(path, opts={}){
+  const r = await fetch(path, { ...opts, headers: { ...(opts.headers||{}), 'x-admin-secret': secret } });
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.error || ('Request failed (' + r.status + ')'));
+  return data;
+}
+
+$('loadBtn').onclick = async () => {
+  secret = $('secret').value.trim();
+  if(!secret) return;
+  clearErr();
+  try{
+    await adminFetch('/api/admin/clients');
+    sessionStorage.setItem('adminSecret', secret);
+    $('main').style.display='block';
+    loadClients();
+  }catch(e){ showErr('Could not unlock: ' + e.message); }
+};
+if(secret){ $('loadBtn').onclick(); }
+
+$('createBtn').onclick = async () => {
+  clearErr();
+  $('result').style.display='none';
+  const name = $('name').value.trim();
+  const uploadLimit = parseInt($('limit').value, 10) || 10;
+  const periodDays = parseInt($('days').value, 10) || 30;
+  if(!name) return showErr('Enter a client name.');
+  try{
+    const data = await adminFetch('/api/admin/clients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, uploadLimit, periodDays }),
+    });
+    $('keyText').textContent = data.apiKey;
+    $('result').style.display='block';
+    $('name').value='';
+    loadClients();
+  }catch(e){ showErr(e.message); }
+};
+
+$('copyBtn').onclick = () => {
+  navigator.clipboard.writeText($('keyText').textContent).then(()=>{
+    $('copyBtn').textContent='Copied!';
+    setTimeout(()=> $('copyBtn').textContent='Copy', 1200);
+  });
+};
+
+$('refreshBtn').onclick = loadClients;
+
+async function loadClients(){
+  try{
+    const clients = await adminFetch('/api/admin/clients');
+    if(!clients.length){
+      $('clientRows').innerHTML = '<tr><td colspan="6" class="muted">No clients yet.</td></tr>';
+      return;
+    }
+    $('clientRows').innerHTML = clients.map(c => `
+      <tr>
+        <td>${esc(c.name)}</td>
+        <td>${esc(c.plan)}</td>
+        <td>${c.uploads_used}/${c.upload_limit}</td>
+        <td>${c.period_days}d</td>
+        <td><span class="badge ${c.active?'on':'off'}">${c.active?'Active':'Disabled'}</span></td>
+        <td><button class="btn sec" style="margin-top:0;padding:5px 10px;font-size:12px" data-id="${c.id}" data-active="${c.active}">${c.active?'Disable':'Enable'}</button></td>
+      </tr>
+    `).join('');
+  }catch(e){ showErr(e.message); }
+}
+
+$('clientRows').addEventListener('click', async e => {
+  if(e.target.tagName !== 'BUTTON') return;
+  const id = e.target.dataset.id;
+  const active = e.target.dataset.active === 'true';
+  try{
+    await adminFetch(`/api/admin/clients/${id}/active`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !active }),
+    });
+    loadClients();
+  }catch(e2){ showErr(e2.message); }
+});
+</script>
+</body>
+</html>

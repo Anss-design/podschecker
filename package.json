@@ -1,0 +1,16 @@
+{
+  "name": "pod-dashboard-saas",
+  "version": "1.0.0",
+  "description": "Licensed, server-side POD order dashboard with per-client upload limits and usage tracking.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "admin": "node lib/admin-cli.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1"
+  }
+}
